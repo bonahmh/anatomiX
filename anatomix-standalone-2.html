@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AnatomiX</title>
+<style>
+:root{--bg:#0d1117;--ink:#e6edf3;--mute:#8b98a9;--glass:rgba(20,28,40,.58);--line:rgba(140,200,255,.2);--neon:#7cf7ff;--hot:#ffb35c;color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font:14px/1.45 "Avenir Next","Segoe UI",system-ui,sans-serif;touch-action:none}
+canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
+.glass{background:var(--glass);backdrop-filter:blur(14px) saturate(1.3);-webkit-backdrop-filter:blur(14px) saturate(1.3);border:1px solid var(--line);border-radius:14px}
+#brand{position:fixed;left:16px;top:calc(12px + env(safe-area-inset-top,0px));font-family:Georgia,serif;font-size:20px}
+#brand small{display:block;font:12px system-ui,sans-serif;color:var(--mute)}
+#panel{position:fixed;right:14px;top:calc(12px + env(safe-area-inset-top,0px));width:min(310px,calc(100vw - 28px));padding:14px 16px}
+#panel.on{border-color:rgba(255,179,92,.6)}
+#panel h2{margin:0;font-size:17px}.lat{font:italic 14px Georgia,serif;color:var(--hot);margin:1px 0 8px}
+.sys{display:inline-block;font-size:12px;padding:2px 9px;border:1px solid var(--line);border-radius:99px;color:var(--neon);margin-bottom:8px}
+#pk{margin:0;padding-left:17px;color:#c5d0dc;font-size:13px}#pk li{margin:3px 0}#empty{color:var(--mute)}
+#iso{display:none;width:100%;margin-top:10px;border-color:var(--hot);color:var(--hot)}
+#controls{position:fixed;left:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));width:min(340px,calc(100vw - 28px));padding:14px;max-height:calc(100vh - 28px);overflow:auto}
+#controls label.l{display:flex;justify-content:space-between;color:var(--mute);font-size:12px;margin-bottom:2px}#controls label.l b{color:var(--ink);font-weight:500}
+input[type=range]{width:100%;accent-color:var(--neon);margin:2px 0 8px}
+select{width:100%;font:inherit;color:var(--ink);background:#151c27;border:1px solid var(--line);border-radius:9px;padding:7px;margin-bottom:2px}
+.row{display:grid;gap:6px;margin-top:8px}.r4{grid-template-columns:repeat(4,1fr)}.r2{grid-template-columns:1fr 1fr}
+button,.btn{font:inherit;color:var(--ink);background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:7px 4px;cursor:pointer;font-size:13px;text-align:center}
+button[aria-pressed=true]{background:rgba(124,247,255,.14);border-color:var(--neon);color:var(--neon)}
+button:focus-visible,input:focus-visible,select:focus-visible,.btn:focus-within{outline:2px solid var(--hot);outline-offset:2px}
+#st{margin-top:8px;font-size:12px;color:var(--mute)}#tab{display:none;width:100%}
+#hud{position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));width:190px;height:142px;border-radius:12px;border:1px solid var(--line);display:none;background:#000a}
+@media(max-width:700px){#hud{width:120px;height:90px;bottom:calc(330px + env(safe-area-inset-bottom,0px))}#panel{top:calc(56px + env(safe-area-inset-top,0px));left:14px;width:auto}}
+#lead{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
+#lead line{stroke:var(--hot);stroke-width:1.4;stroke-dasharray:5 4;animation:d 1s linear infinite}#lead circle{fill:var(--hot)}
+@keyframes d{to{stroke-dashoffset:-9}}
+#cur{position:fixed;width:38px;height:38px;margin:-19px;border-radius:50%;pointer-events:none;display:none;--p:0;background:conic-gradient(var(--hot) calc(var(--p)*1turn),var(--neon) 0);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3px));mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 3px))}
+@media(prefers-reduced-motion:reduce){#lead line{animation:none}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+</head><body>
+<canvas id="gl"></canvas>
+<svg id="lead"><line id="ln" style="display:none"/><circle id="dot" r="4" style="display:none"/></svg>
+<div id="cur"></div>
+<div id="brand">AnatomiX<small>Cranial atlas</small></div>
+<aside id="panel" class="glass" aria-live="polite">
+ <div id="empty">Point at a bone (or hover or tap it) to inspect it. Double-tap, or hold a point for 1.2 s, to isolate it.</div>
+ <div id="info" style="display:none"><h2 id="pn"></h2><div class="lat" id="pl"></div><span class="sys" id="ps"></span><ul id="pk"></ul></div>
+ <button id="iso">Isolate this bone</button>
+</aside>
+<section id="controls" class="glass">
+ <label class="l" for="bones"><span>Bone preview</span></label>
+ <select id="bones"><option value="">All bones</option></select>
+ <label class="l" for="depth" style="margin-top:8px"><span>Layer depth</span><b id="dl"></b></label>
+ <input id="depth" type="range" min="0" max="100" value="30">
+ <label class="l" for="rel"><span>Surface relief</span><b id="rv">1.4×</b></label>
+ <input id="rel" type="range" min="5" max="35" value="14">
+ <div class="row r4" id="tg">
+  <button data-s="skeletal" aria-pressed="true">Skeletal</button><button data-s="vascular" aria-pressed="false">Vascular</button>
+  <button data-s="nervous" aria-pressed="false">Nervous</button><button data-s="muscular" aria-pressed="false">Muscular</button>
+ </div>
+ <div class="row r2"><button id="turn">Turn model</button><button id="tilt">Tilt model</button></div>
+ <div class="row r2"><label class="btn">Load own .glb<input id="file" type="file" accept=".glb,.gltf" hidden></label><button id="cam">Enable hand tracking</button></div>
+ <button id="tab" class="row">Open in a new tab for camera access</button>
+ <div id="st">Loading skull model…</div>
+</section>
+<canvas id="hud" width="380" height="284"></canvas>
+<video id="vid" playsinline muted style="display:none"></video>
+
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+const $=id=>document.getElementById(id),clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),st=$('st');
+// Skull: Khronos "ScatteringSkull" (CC0, Vladimir Petkovic). Tried in order; put your own GLB URL first.
+const MODEL_URLS=['https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/ScatteringSkull/glTF-Binary/ScatteringSkull.glb',
+ 'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/ScatteringSkull/glTF-Binary/ScatteringSkull.glb',
+ 'https://asset-explorer.needle.tools/downloads/ScatteringSkull.glb'];
+
+// ---------- scene ----------
+const R=new THREE.WebGLRenderer({canvas:$('gl'),antialias:true});
+R.setPixelRatio(Math.min(devicePixelRatio,2));R.outputColorSpace=THREE.SRGBColorSpace;R.toneMapping=THREE.ACESFilmicToneMapping;R.toneMappingExposure=1.1;
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x0d1117);scene.fog=new THREE.FogExp2(0x0d1117,.035);
+scene.environment=new THREE.PMREMGenerator(R).fromScene(new RoomEnvironment(),.04).texture;
+const cam=new THREE.PerspectiveCamera(40,1,.05,60);let zT=7;cam.position.set(0,.2,zT);scene.add(cam);
+const head=new THREE.DirectionalLight(0xffffff,.9);head.position.set(0,0,1);cam.add(head); // headlamp keeps close-ups readable
+const key=new THREE.DirectionalLight(0xffffff,2.2);key.position.set(3,4,5);scene.add(key);
+const rim=new THREE.PointLight(0x4de8ff,90,16);rim.position.set(-4,2,-3);scene.add(rim);
+const fill=new THREE.PointLight(0xff9a62,30,14);fill.position.set(3,-2,3);scene.add(fill);
+const grid=new THREE.GridHelper(24,48,0x1f6f86,0x16303c);grid.position.y=-2;grid.material.transparent=true;grid.material.opacity=.5;scene.add(grid);
+const atlas=new THREE.Group(),pivot=new THREE.Group();atlas.add(pivot);scene.add(atlas);
+
+// ---------- regions in normalised skull space: u -1..1 (side), v 0..1 (jaw to vertex), w 0..1 (back to front) ----------
+const REG=[
+{id:'frontal',n:'Frontal bone',l:'Os frontale',cat:'Craniofacial',c:[0,.82,.86],r:[.6,.2,.18],k:['Forms the forehead and the roof of the orbits.','Frontal sinus lies behind the glabella. Fractures can tear the dura and cause CSF leak.']},
+{id:'parietal',n:'Parietal bone',l:'Os parietale',cat:'Craniofacial',c:[0,.92,.48],r:[.8,.18,.3],k:['Paired vault bones meeting at the sagittal suture; bregma sits at the coronal junction.','Overlies the middle meningeal groove, so fractures risk epidural haematoma.']},
+{id:'temporal',n:'Temporal bone',l:'Os temporale',cat:'Craniofacial',sym:1,c:[.9,.6,.4],r:[.22,.22,.22],k:['Houses the middle and inner ear; mastoid process lies behind the ear.','Pterion, where frontal, parietal, temporal and sphenoid meet, is the thinnest vault point.']},
+{id:'occipital',n:'Occipital bone',l:'Os occipitale',cat:'Craniofacial',c:[0,.6,.06],r:[.7,.32,.16],k:['Forms the skull base and back; foramen magnum transmits the medulla and vertebral arteries.','Occipital condyles articulate with the atlas (C1).']},
+{id:'orbit',n:'Orbit',l:'Orbita',cat:'Craniofacial',sym:1,c:[.36,.5,.9],r:[.24,.11,.14],k:['Bony cavity for the globe, extraocular muscles and optic nerve (via the optic canal).','Thin medial and inferior walls make blow-out fractures common.']},
+{id:'nasal',n:'Nasal region',l:'Regio nasalis',cat:'Craniofacial',c:[0,.38,.96],r:[.13,.11,.1],k:['Pear-shaped nasal aperture bounded by the nasal bones and maxillae.','Anterior nasal spine marks its lower midpoint.']},
+{id:'zygoma',n:'Zygomatic arch',l:'Arcus zygomaticus',cat:'Craniofacial',sym:1,c:[.74,.42,.66],r:[.2,.1,.26],k:['Zygomatic bone plus temporal process; origin of masseter.','Tripod fracture disrupts three zygomatic articulations.']},
+{id:'maxilla',n:'Maxilla and upper teeth',l:'Maxilla et dentes superiores',cat:'Craniofacial',c:[0,.27,.92],r:[.42,.1,.12],k:['Upper jaw, hard palate and the maxillary sinus.','Infraorbital foramen carries the infraorbital nerve (V2).']},
+{id:'mandible',n:'Mandible',l:'Mandibula',cat:'Craniofacial',c:[0,.1,.76],r:[.8,.14,.34],k:['Only mobile skull bone: body, angle, ramus, coronoid process and condyle.','Condyle articulates at the temporomandibular joint. Inferior alveolar nerve runs in the mandibular canal.']},
+{id:'neuro',n:'Neurocranium',l:'Neurocranium (Calvaria)',cat:'Craniofacial',c:[0,.75,.5],r:[.9,.25,.45],k:['Cranial vault protecting the brain; bones are joined by fibrous sutures.']}];
+const NAMED=[[/frontal/i,'frontal'],[/pariet/i,'parietal'],[/occipit/i,'occipital'],[/tempor/i,'temporal'],[/mandib|jaw/i,'mandible'],[/maxill/i,'maxilla'],[/zygom/i,'zygoma'],[/orbit/i,'orbit'],[/nasal/i,'nasal']];
+const RB=Object.fromEntries(REG.map(r=>[r.id,r]));
+const OVD=[
+{n:'Cerebral hemispheres',l:'Hemispheria cerebri',sys:'nervous',cat:'Neurovascular',d:.9,t:'brain',sym:1,e:[[.4,.66,.48],[.37,.25,.36]],k:['Schematic. Four lobes: frontal, parietal, temporal, occipital.','Broca area and Wernicke area are usually left-sided.']},
+{n:'Temporalis muscle',l:'Musculus temporalis',sys:'muscular',cat:'Musculoskeletal',d:.22,t:'muscle',sym:1,e:[[.9,.6,.4],[.06,.2,.2]],k:['Schematic. Fan from the temporal fossa to the coronoid process; elevates the mandible.','Supplied by deep temporal nerves (V3).']},
+{n:'Masseter muscle',l:'Musculus masseter',sys:'muscular',cat:'Musculoskeletal',d:.22,t:'muscle',sym:1,e:[[.8,.22,.62],[.06,.16,.1]],k:['Schematic. Zygomatic arch to mandibular angle; powerful jaw elevator.','Masseteric nerve (V3); the parotid duct crosses its surface.']},
+{n:'Superficial temporal artery',l:'Arteria temporalis superficialis',sys:'vascular',cat:'Neurovascular',d:.38,t:'artery',sym:1,p:[[.93,.35,.5],[.97,.55,.5],[.95,.75,.5],[.8,.9,.62],[.5,.96,.8]],w:.006,k:['Schematic. Terminal branch of the external carotid; pulse palpable in front of the tragus.','Biopsied when giant cell arteritis is suspected.']},
+{n:'Facial artery',l:'Arteria facialis',sys:'vascular',cat:'Neurovascular',d:.38,t:'artery',sym:1,p:[[.72,.1,.5],[.68,.15,.8],[.5,.25,.94],[.3,.38,.98]],w:.005,k:['Schematic. Crosses the mandibular border in front of the masseter; pulse palpable there.']},
+{n:'Facial nerve (CN VII)',l:'Nervus facialis',sys:'nervous',cat:'Neurovascular',d:.42,t:'nerve',sym:1,p:[[.78,.45,.28],[.72,.35,.5],[.6,.28,.8]],w:.005,k:['Schematic. Exits at the stylomastoid foramen and fans through the parotid plexus.','Lesions cause Bell palsy.']},
+{n:'Optic nerve (CN II)',l:'Nervus opticus',sys:'nervous',cat:'Neurovascular',d:.75,t:'nerve',sym:1,p:[[.1,.5,.55],[.3,.5,.8],[.36,.5,.9]],w:.008,k:['Schematic. CNS tract from retina to chiasm via the optic canal.','Raised intracranial pressure can show as papilloedema.']}];
+const MAT={brain:{color:0xdea9ae,roughness:.55},muscle:{color:0xb0343c,roughness:.5,clearcoat:.35},artery:{color:0xe11d2e,roughness:.3,clearcoat:.8,emissive:0x3a0006},nerve:{color:0xf4d35e,roughness:.35,emissive:0x2a2200}};
+
+// ---------- highlight shader ----------
+function withFres(mesh){const f=new THREE.Mesh(mesh.geometry,new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+ vertexShader:'varying vec3 n;varying vec3 v;void main(){vec4 mv=modelViewMatrix*vec4(position,1.);n=normalize(normalMatrix*normal);v=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;}',
+ fragmentShader:'varying vec3 n;varying vec3 v;void main(){float f=pow(1.-abs(dot(n,v)),2.);gl_FragColor=vec4(vec3(1.,.7,.36)*(f*1.8+.15),f+.15);}'}));
+ f.raycast=()=>{};f.visible=false;f.renderOrder=20;mesh.add(f);mesh.userData.fo=f;return f}
+
+// ---------- model loading, fitting and splitting into bones ----------
+const SK={sys:'skeletal',depth:.6,base:1,cur:1,tgt:1,meshes:[],mats:[],info:{},lab:{}};let model=null,src=[],OV=[],BX=null;const orient={x:0,y:0,n:0};
+const loader=new GLTFLoader();
+const loadFrom=url=>new Promise((res,rej)=>loader.load(url,res,e=>{if(e.total)st.textContent='Loading skull model… '+Math.round(e.loaded/e.total*100)+'%'},rej));
+async function loadAny(urls){for(const u of urls){try{return await loadFrom(u)}catch(e){console.warn('Model URL failed',u,e)}}throw new Error('all sources failed')}
+function setModel(gltf){
+ if(model){pivot.remove(model);SK.mats.forEach(m=>m.dispose())}
+ model=gltf.scene;pivot.add(model);src=[];model.traverse(o=>{if(o.isMesh)src.push(o)});SK.mats=[];SK.meshes=[];
+ const an=R.capabilities.getMaxAnisotropy();
+ src.forEach(m=>{const mt=m.material=m.material.clone();mt.transparent=true;mt.envMapIntensity=1.3;
+  ['map','normalMap','aoMap','roughnessMap','metalnessMap'].forEach(k=>{if(mt[k])mt[k].anisotropy=an});SK.mats.push(mt)});
+ applyRelief();refit()}
+function boxNow(){const r=atlas.rotation.clone(),p=atlas.position.clone();atlas.rotation.set(0,0,0);atlas.position.set(0,0,0);atlas.updateMatrixWorld(true);const b=new THREE.Box3().setFromObject(model);atlas.rotation.copy(r);atlas.position.copy(p);atlas.updateMatrixWorld(true);return b}
+function refit(){
+ pivot.rotation.set(orient.x,orient.y,0);pivot.scale.setScalar(1);pivot.position.set(0,0,0);
+ let b=boxNow(),s=new THREE.Vector3(),c=new THREE.Vector3();b.getSize(s);b.getCenter(c);const k=3.2/Math.max(s.y,s.x*.9,s.z*.9);
+ pivot.scale.setScalar(k);pivot.position.copy(c).multiplyScalar(-k);b=boxNow();b.getSize(s);b.getCenter(c);
+ BX={cx:c.x,miny:b.min.y,minz:b.min.z,hx:s.x/2,H:s.y,D:s.z};
+ buildBones();buildOverlays();exitIso();setSel(null);
+ st.textContent='Skull loaded. If it faces away, use Turn or Tilt.'}
+const nPos=(u,v,w)=>new THREE.Vector3(BX.cx+u*BX.hx,BX.miny+v*BX.H,BX.minz+w*BX.D);
+function classify(x,y,z){const qx=(x-BX.cx)/BX.hx,qy=(y-BX.miny)/BX.H,qz=(z-BX.minz)/BX.D,sd=qx>=0?1:-1;let best=RB.neuro,bd=1e9;
+ for(const d of REG){const dist=Math.hypot((qx-(d.sym?d.c[0]*sd:d.c[0]))/d.r[0],(qy-d.c[1])/d.r[1],(qz-d.c[2])/d.r[2]);if(dist<bd){bd=dist;best=d}}
+ if(bd>1.8)best=RB.neuro;return best.id+(best.sym?(sd>0?'L':'R'):'')}
+// split every mesh into per-bone meshes that share vertex data but have their own index list
+function buildBones(){
+ SK.meshes.forEach(m=>{m.parent&&m.parent.remove(m);m.geometry.dispose()});SK.meshes=[];SK.info={};SK.lab={};
+ atlas.updateMatrixWorld(true);const ainv=new THREE.Matrix4().copy(atlas.matrixWorld).invert(),v=new THREE.Vector3();
+ src.forEach(s=>{s.visible=false;const g=s.geometry,pos=g.attributes.position,n=pos.count,idx=g.index?g.index.array:null,tc=idx?idx.length:n;
+  const M=new THREE.Matrix4().multiplyMatrices(ainv,s.matrixWorld),P=new Float32Array(n*3);
+  for(let i=0;i<n;i++){v.fromBufferAttribute(pos,i).applyMatrix4(M);P[i*3]=v.x;P[i*3+1]=v.y;P[i*3+2]=v.z}
+  const fixed=s.name&&src.length>2?NAMED.find(([re])=>re.test(s.name)):null,bk={};
+  for(let t=0;t<tc;t+=3){const a=idx?idx[t]:t,b=idx?idx[t+1]:t+1,c=idx?idx[t+2]:t+2;
+   const key=fixed?fixed[1]:classify((P[a*3]+P[b*3]+P[c*3])/3,(P[a*3+1]+P[b*3+1]+P[c*3+1])/3,(P[a*3+2]+P[b*3+2]+P[c*3+2])/3);
+   const o=bk[key]||(bk[key]={i:[],box:new THREE.Box3()});o.i.push(a,b,c);[a,b,c].forEach(q=>o.box.expandByPoint(v.set(P[q*3],P[q*3+1],P[q*3+2])))}
+  for(const key in bk){const bg=new THREE.BufferGeometry();for(const k in g.attributes)bg.setAttribute(k,g.attributes[k]);bg.setIndex(bk[key].i);
+   const m=new THREE.Mesh(bg,s.material);m.position.copy(s.position);m.quaternion.copy(s.quaternion);m.scale.copy(s.scale);s.parent.add(m);
+   m.userData.key=key;withFres(m);SK.meshes.push(m);
+   if(SK.info[key])SK.info[key].box.union(bk[key].box);else{SK.info[key]={box:bk[key].box};const id=key.replace(/[LR]$/,''),sd=key.slice(id.length);SK.lab[key]=RB[id].n+(sd?(sd==='L'?' (left)':' (right)'):'')}}});
+ const sel=$('bones');sel.innerHTML='<option value="">All bones</option>';
+ Object.keys(SK.lab).sort((a,b)=>SK.lab[a].localeCompare(SK.lab[b])).forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=SK.lab[k];sel.appendChild(o)})}
+function buildOverlays(){
+ OV.forEach(o=>{atlas.remove(o.group);o.mat.dispose()});OV=[];
+ OVD.forEach(d=>{const mat=new THREE.MeshPhysicalMaterial(Object.assign({transparent:true},MAT[d.t])),g=new THREE.Group(),meshes=[];
+  (d.sym?[1,-1]:[1]).forEach(sd=>{let m;
+   if(d.e){m=new THREE.Mesh(new THREE.SphereGeometry(1,40,28),mat);m.position.copy(nPos(d.e[0][0]*sd,d.e[0][1],d.e[0][2]));m.scale.set(d.e[1][0]*BX.hx,d.e[1][1]*BX.H,d.e[1][2]*BX.D)}
+   else m=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(d.p.map(p=>nPos(p[0]*sd,p[1],p[2]))),48,d.w*BX.H,8),mat);
+   g.add(m);meshes.push(m)});
+  const o={def:d,sys:d.sys,depth:d.d,base:1,cur:0,tgt:1,group:g,mat,meshes};meshes.forEach(m=>{m.userData.ov=o});o.fr=meshes.map(withFres);atlas.add(g);OV.push(o)});
+ retarget()}
+$('turn').onclick=()=>{orient.y+=Math.PI/2;if(model)refit()};
+$('tilt').onclick=()=>{orient.n=(orient.n+1)%3;orient.x=[0,-Math.PI/2,Math.PI/2][orient.n];if(model)refit()};
+$('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;st.textContent='Loading '+f.name+'…';try{setModel(await loadFrom(URL.createObjectURL(f)))}catch(err){st.textContent='Could not read that file as GLB/glTF.'}};
+function applyRelief(){const v=$('rel').value/10;$('rv').textContent=v.toFixed(1)+'×';SK.mats.forEach(m=>m.normalScale&&m.normalScale.set(v,v))}
+$('rel').oninput=applyRelief;
+
+// ---------- layers and systems ----------
+const on={skeletal:1,vascular:0,nervous:0,muscular:0};let S=.3;
+const names=[[.1,'Skin'],[.3,'Muscle'],[.5,'Vessels and nerves'],[.7,'Bone'],[1.1,'Brain']];
+const parts=()=>[SK,...OV];
+function retarget(){parts().forEach(p=>{p.tgt=p.depth<S-.15?.05:p.depth<=S+.3?p.base:p.base*.35});$('dl').textContent=names.find(n=>S<n[0])[1]}
+$('depth').oninput=e=>{S=e.target.value/100;retarget()};retarget();
+$('tg').onclick=e=>{const b=e.target.closest('button');if(!b)return;const s=b.dataset.s;on[s]=!on[s];b.setAttribute('aria-pressed',!!on[s])};
+
+// ---------- inspect and isolate ----------
+const rc=new THREE.Raycaster(),panel=$('panel'),focus=new THREE.Vector3(),focusT=new THREE.Vector3();let anchor=null,haveSel=false,selKey=null,iso=null;
+const zmin=()=>iso?1:3;
+function glowReset(){SK.meshes.forEach(m=>m.userData.fo.visible=false);OV.forEach(o=>o.fr.forEach(f=>f.visible=false))}
+function updIso(){const b=$('iso');b.style.display=(selKey||iso)?'block':'none';b.textContent=iso?'Show all bones':'Isolate this bone'}
+function showInfo(d,name){haveSel=true;panel.classList.add('on');$('empty').style.display='none';$('info').style.display='';
+ $('pn').textContent=name||d.n;$('pl').textContent=d.l;$('ps').textContent=d.cat;$('pk').innerHTML=d.k.map(x=>'<li>'+x+'</li>').join('');updIso()}
+function setSel(){glowReset();anchor=null;selKey=null;haveSel=false;panel.classList.remove('on');$('empty').style.display='';$('info').style.display='none';updIso()}
+function isolate(k){if(!SK.info[k])return;iso=k;selKey=k;const b=SK.info[k].box,s=b.getSize(new THREE.Vector3());b.getCenter(focusT);
+ zT=clamp(Math.max(s.x,s.y,s.z)*2.4,1.3,12);glowReset();$('bones').value=k;showInfo(RB[k.replace(/[LR]$/,'')],SK.lab[k])}
+function exitIso(){iso=null;focusT.set(0,0,0);zT=7;$('bones').value='';updIso()}
+$('bones').onchange=e=>e.target.value?isolate(e.target.value):exitIso();
+$('iso').onclick=()=>iso?exitIso():selKey&&isolate(selKey);
+// returns a bone key, 'ov' for a schematic overlay, or null when nothing is under the pointer
+function inspect(nx,ny){if(!BX)return null;rc.setFromCamera(new THREE.Vector2(nx,ny),cam);const objs=[];
+ if(on.skeletal&&SK.cur>.25)SK.meshes.forEach(m=>{if(m.visible)objs.push(m)});OV.forEach(o=>{if(o.group.visible&&o.cur>.25)objs.push(...o.meshes)});
+ const h=rc.intersectObjects(objs,false)[0];if(!h)return null;const o=h.object;glowReset();anchor=atlas.worldToLocal(h.point.clone());
+ if(o.userData.ov){selKey=null;showInfo(o.userData.ov.def);o.userData.ov.fr.forEach(f=>f.visible=true);return 'ov'}
+ selKey=o.userData.key;showInfo(RB[selKey.replace(/[LR]$/,'')],SK.lab[selKey]);
+ if(!iso)SK.meshes.forEach(m=>{if(m.userData.key===selKey)m.userData.fo.visible=true});return selKey}
+
+// ---------- mouse / touch ----------
+let rx=.05,ry=0,cx=.05,cy=0,moved=0,pd=0,lastTap=0,handsOn=false;const ptrs=new Map(),cv=$('gl');
+const pdist=()=>{const a=[...ptrs.values()];return Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1])},ndc=e=>[e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1];
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);moved=0;pd=ptrs.size==2?pdist():0});
+cv.addEventListener('pointermove',e=>{const o=ptrs.get(e.pointerId);
+ if(!o){if(!handsOn&&e.pointerType==='mouse')inspect(...ndc(e));return}
+ if(ptrs.size==2){ptrs.set(e.pointerId,[e.clientX,e.clientY]);const d=pdist();if(pd)zT=clamp(zT*pd/d,zmin(),12);pd=d;return}
+ const dx=e.clientX-o[0],dy=e.clientY-o[1];moved+=Math.abs(dx)+Math.abs(dy);ry+=dx*.008;rx=clamp(rx+dy*.008,-1.2,1.2);ptrs.set(e.pointerId,[e.clientX,e.clientY])});
+cv.addEventListener('pointerup',e=>{if(ptrs.has(e.pointerId)&&ptrs.size==1&&moved<6){const now=performance.now(),dbl=now-lastTap<350,k=inspect(...ndc(e));lastTap=now;
+ if(dbl){if(k&&k!=='ov'&&k!==iso)isolate(k);else if(!k&&iso)exitIso()}else if(k===null)setSel()}ptrs.delete(e.pointerId)});
+cv.addEventListener('pointercancel',e=>ptrs.delete(e.pointerId));
+cv.addEventListener('wheel',e=>{e.preventDefault();zT=clamp(zT*(1+e.deltaY*.001),zmin(),12)},{passive:false});
+
+// ---------- hand tracking ----------
+// pinch + drag = rotate | thumb and index spread/close (other fingers curled) = zoom | index only = point (hold 1.2 s = isolate) | two hands = zoom
+let sm=[null,null],pinch=[false,false],last=null,zr=null,zp=null,zoomMode=false,ptr=null,dk=null,dT=0,tPrev=performance.now();
+const vid=$('vid'),hud=$('hud'),hc=hud.getContext('2d'),curEl=$('cur'),embedded=window.self!==window.top;
+const CON=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+const d2=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),AL=.4;
+function ema(i,lm){const p=sm[i];if(!p||p.length!==21)return sm[i]=lm.map(l=>({x:l.x,y:l.y}));lm.forEach((l,k)=>{p[k].x+=(l.x-p[k].x)*AL;p[k].y+=(l.y-p[k].y)*AL});return p}
+function drawHud(hs){const w=hud.width,h=hud.height;hc.clearRect(0,0,w,h);hc.save();hc.translate(w,0);hc.scale(-1,1);hc.globalAlpha=.4;hc.drawImage(vid,0,0,w,h);hc.restore();hc.globalAlpha=1;
+ hs.forEach((l,i)=>{hc.shadowColor='#7cf7ff';hc.shadowBlur=10;hc.strokeStyle='rgba(124,247,255,.75)';hc.lineWidth=2;CON.forEach(([a,b])=>{hc.beginPath();hc.moveTo((1-l[a].x)*w,l[a].y*h);hc.lineTo((1-l[b].x)*w,l[b].y*h);hc.stroke()});
+  l.forEach((q,k)=>{hc.fillStyle=(k==4||k==8)&&(pinch[i]||zoomMode)?'#ffb35c':'#7cf7ff';hc.beginPath();hc.arc((1-q.x)*w,q.y*h,k==8||k==4?5:3,0,7);hc.fill()})});hc.shadowBlur=0}
+function onRes(res){
+ const now=performance.now(),dt=(now-tPrev)/1000;tPrev=now;
+ const hs=(res.multiHandLandmarks||[]).slice().sort((a,b)=>a[0].x-b[0].x).map((l,i)=>ema(i,l));if(hs.length<2)sm[1]=null;
+ hs.forEach((l,i)=>{const r=d2(l[4],l[8])/d2(l[0],l[9]);pinch[i]=pinch[i]?r<.45:r<.3});
+ if(hs.length!==1)zoomMode=false;drawHud(hs);ptr=null;
+ if(hs.length===2){const d=d2(hs[0][9],hs[1][9]);if(!zr)zr={d,z:zT};zT=clamp(zr.z*zr.d/d,zmin(),12);last=null;zp=null;dk=null}
+ else if(hs.length===1){zr=null;const l=hs[0],hz=d2(l[0],l[9]),ex=i=>d2(l[i],l[0])>d2(l[i-2],l[0])*1.04,r=d2(l[4],l[8])/hz,ts=d2(l[4],l[5])/hz;
+  if(pinch[0]){const m={x:(l[4].x+l[8].x)/2,y:(l[4].y+l[8].y)/2};if(last){ry-=(m.x-last.x)*6;rx=clamp(rx+(m.y-last.y)*5,-1.2,1.2)}last=m;zp=null;dk=null;zoomMode=false}
+  else{last=null;const idx=ex(8)&&!ex(12)&&!ex(16)&&!ex(20);
+   zoomMode=idx&&(zoomMode?ts>.6:ts>.8)&&r>.5;
+   if(zoomMode){if(zp!==null&&Math.abs(r-zp)>.004)zT=clamp(zT*Math.pow(zp/r,1.6),zmin(),12);zp=r;dk=null}   // spread = closer
+   else{zp=null;
+    if(idx){ptr={x:1-l[8].x,y:l[8].y};const k=inspect(ptr.x*2-1,-ptr.y*2+1),kk=k===null?'':k;
+     if(dk===kk)dT+=dt;else{dk=kk;dT=0}
+     const act=kk==='ov'?false:kk?kk!==iso:!!iso;
+     curEl.style.cssText='display:block;left:'+ptr.x*innerWidth+'px;top:'+ptr.y*innerHeight+'px';curEl.style.setProperty('--p',act&&dT>0?Math.min(dT/1.2,1):0);
+     if(dT>=1.2){if(act){kk?isolate(kk):exitIso()}dT=-1}}
+    else dk=null}}}
+ else{zr=null;last=null;zp=null;dk=null}
+ if(!ptr)curEl.style.display='none'}
+function camFallback(msg){handsOn=false;st.textContent=msg+' Mouse and touch controls remain active.';$('cam').disabled=false;if(embedded)$('tab').style.display='block'}
+$('tab').onclick=()=>window.open(location.href,'_blank','noopener');
+async function startHands(){
+ const pp=document.permissionsPolicy||document.featurePolicy;
+ if(!window.Hands)return camFallback('The MediaPipe library did not load (blocked network or content policy).');
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return camFallback('Camera access needs a secure page (https:// or localhost).');
+ if(embedded&&pp&&pp.allowsFeature&&!pp.allowsFeature('camera'))return camFallback('This embedded frame is not allowed to use the camera. The embedding page needs allow="camera".');
+ $('cam').disabled=true;st.textContent='Requesting camera…';
+ try{vid.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:640,height:480},audio:false});await vid.play();
+  const hands=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
+  hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:.6,minTrackingConfidence:.5});hands.onResults(onRes);
+  st.textContent='Loading hand model…';await hands.send({image:vid});
+  handsOn=true;hud.style.display='block';$('cam').textContent='Hand tracking on';$('tab').style.display='none';
+  st.textContent='Pinch and drag: rotate. Thumb and index in an L, spread or close: zoom. Point and hold: isolate.';
+  (function loop(){if(vid.readyState>=2)hands.send({image:vid}).catch(()=>{});requestAnimationFrame(loop)})();
+ }catch(e){const m={NotAllowedError:embedded?'Camera permission was denied or blocked by the frame.':'Camera permission was denied. Allow it in the address bar and try again.',NotFoundError:'No camera was found.',NotReadableError:'The camera is in use by another app.',SecurityError:'The browser blocked the camera for this page.'}[e.name];camFallback(m||'Hand tracking could not start ('+(e.message||e.name)+').')}}
+$('cam').onclick=startHands;
+
+// ---------- render loop ----------
+function size(){R.setSize(innerWidth,innerHeight,false);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}addEventListener('resize',size);size();
+const ln=$('ln'),dot=$('dot'),v3=new THREE.Vector3();
+(function frame(t){requestAnimationFrame(frame);
+ cx+=(rx-cx)*.14;cy+=(ry-cy)*.14;atlas.rotation.set(cx,cy,0);
+ focus.lerp(focusT,.1);atlas.position.copy(focus).applyEuler(atlas.rotation).multiplyScalar(-1);atlas.updateMatrixWorld(true); // rotate about the isolated bone
+ cam.position.z+=(zT-cam.position.z)*.1;cam.lookAt(0,0,0);rim.intensity=85+8*Math.sin(t*.002);
+ parts().forEach(p=>{p.cur+=(p.tgt-p.cur)*.12;const vis=on[p.sys]&&p.cur>.03,dw=p.cur>.9;
+  if(p===SK){SK.meshes.forEach(m=>m.visible=vis&&(!iso||m.userData.key===iso));SK.mats.forEach(m=>{m.opacity=p.cur;m.depthWrite=dw})}
+  else{p.group.visible=vis&&!iso;p.mat.opacity=p.cur;p.mat.depthWrite=dw}});
+ let show=false;
+ if(haveSel&&anchor&&!iso){v3.copy(anchor);atlas.localToWorld(v3).project(cam);const sx=(v3.x*.5+.5)*innerWidth,sy=(-v3.y*.5+.5)*innerHeight,r=panel.getBoundingClientRect();
+  const ex=clamp(sx,r.left,r.right),ey=clamp(sy,r.top,r.bottom);
+  if(Math.hypot(ex-sx,ey-sy)>8&&v3.z<1){ln.setAttribute('x1',sx);ln.setAttribute('y1',sy);ln.setAttribute('x2',ex);ln.setAttribute('y2',ey);dot.setAttribute('cx',sx);dot.setAttribute('cy',sy);show=true}}
+ ln.style.display=dot.style.display=show?'':'none';
+ R.render(scene,cam)})(0);
+
+loadAny(MODEL_URLS).then(setModel).catch(()=>{st.textContent='Could not download the skull model. Use "Load own .glb" to pick a file from your device.'});
+</script></body></html>
